@@ -1,0 +1,16 @@
+# OS
+.DS_Store
+Thumbs.db
+
+# Editors
+.vscode/
+.idea/
+*.swp
+
+# Logs
+*.log
+
+# Env (each package also has its own .env ignore; this is a safety net)
+.env
+.env.local
+.env.*.local

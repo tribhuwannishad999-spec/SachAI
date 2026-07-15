@@ -1,0 +1,38 @@
+@import url('https://fonts.googleapis.com/css2?family=Baloo+2:wght@500;600;700;800&family=Noto+Sans+Devanagari:wght@400;500;600;700&display=swap');
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+html { scroll-behavior: smooth; }
+
+body {
+  font-family: 'Noto Sans Devanagari', 'Baloo 2', sans-serif;
+  @apply bg-[#0F172A] text-[#E9EEFC] dark:bg-[#0F172A];
+  background:
+    radial-gradient(1200px 600px at 15% -10%, rgba(37,99,235,0.30), transparent 60%),
+    radial-gradient(900px 500px at 110% 10%, rgba(34,197,94,0.12), transparent 55%),
+    #0F172A;
+  min-height: 100vh;
+}
+
+.light-mode body,
+body.light-mode {
+  background: #EEF2FB;
+  color: #101832;
+}
+
+.glass {
+  background: rgba(255,255,255,0.06);
+  border: 1px solid rgba(255,255,255,0.12);
+  backdrop-filter: blur(16px);
+}
+
+.light-mode .glass {
+  background: rgba(255,255,255,0.7);
+  border: 1px solid rgba(37,99,235,0.15);
+}
+
+@keyframes spin-slow { to { transform: rotate(360deg); } }
+@keyframes spin-rev { to { transform: rotate(-360deg); } }
+@keyframes pulse-brain { 0%,100% { transform: scale(1);} 50% { transform: scale(1.12);} }
+@keyframes float-particle { 0%,100% { transform: translateY(0) scale(1); opacity:0.3;} 50% { transform: translateY(-16px) scale(1.4); opacity:0.9;} }
