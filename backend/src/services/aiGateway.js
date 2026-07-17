@@ -1,8 +1,10 @@
 /**
  * Unified AI gateway.
  *
- * Tries providers in the priority order specified in the brief:
- *   1. OpenRouter  2. Gemini  3. Groq  4. Hugging Face
+ * Tries providers in this priority order (matches the existing Render env
+ * vars — names are never changed):
+ *   1. GEMINI_API_KEY   2. GROQ_API_KEY   3. DEEPSEEK_API_KEY   4. OPENAI_API_KEY
+ *
  * If a provider is not configured (no key) or its call fails/times out, the
  * gateway automatically retries the SAME prompt on the next provider. If
  * every provider fails, it throws — the caller must surface an honest
@@ -40,43 +42,7 @@ function extractJson(text) {
 
 // ---------- Provider callers (each returns raw text) ----------
 
-async function callOpenRouter({ systemPrompt, userPrompt, imageBase64, imageMimeType }) {
-  if (!env.ai.openrouter.key) throw new Error('OpenRouter not configured');
-  const model = imageBase64 ? env.ai.openrouter.visionModel : env.ai.openrouter.model;
-
-  const userContent = imageBase64
-    ? [
-        { type: 'text', text: userPrompt },
-        { type: 'image_url', image_url: { url: `data:${imageMimeType};base64,${imageBase64}` } },
-      ]
-    : userPrompt;
-
-  const res = await withTimeout(
-    fetch('https://openrouter.ai/api/v1/chat/completions', {
-      method: 'POST',
-      headers: {
-        Authorization: `Bearer ${env.ai.openrouter.key}`,
-        'Content-Type': 'application/json',
-        'HTTP-Referer': 'https://sachai.in',
-        'X-Title': 'SachAI',
-      },
-      body: JSON.stringify({
-        model,
-        messages: [
-          { role: 'system', content: systemPrompt },
-          { role: 'user', content: userContent },
-        ],
-        temperature: 0.2,
-      }),
-    }),
-    TIMEOUT_MS,
-    'OpenRouter'
-  );
-  if (!res.ok) throw new Error(`OpenRouter HTTP ${res.status}: ${await res.text()}`);
-  const data = await res.json();
-  return data.choices?.[0]?.message?.content;
-}
-
+// 1. Gemini (Google AI Studio) — supports text + vision (images) natively.
 async function callGemini({ systemPrompt, userPrompt, imageBase64, imageMimeType }) {
   if (!env.ai.gemini.key) throw new Error('Gemini not configured');
   const model = env.ai.gemini.model;
@@ -109,11 +75,12 @@ async function callGemini({ systemPrompt, userPrompt, imageBase64, imageMimeType
   return data.candidates?.[0]?.content?.parts?.map((p) => p.text).join('\n');
 }
 
+// 2. Groq — OpenAI-compatible chat completions. Groq's hosted vision models
+// change frequently and are not guaranteed available on every account, so
+// this gateway uses Groq for TEXT analysis only (messages, links, phone,
+// news) and lets Gemini/OpenAI handle image/video vision tasks.
 async function callGroq({ systemPrompt, userPrompt }) {
   if (!env.ai.groq.key) throw new Error('Groq not configured');
-  // Groq's current vision support is model-specific and changes frequently;
-  // this gateway uses Groq for TEXT analysis only (messages, links, phone,
-  // news) and relies on OpenRouter/Gemini for image/video vision tasks.
   const res = await withTimeout(
     fetch('https://api.groq.com/openai/v1/chat/completions', {
       method: 'POST',
@@ -138,9 +105,37 @@ async function callGroq({ systemPrompt, userPrompt }) {
   return data.choices?.[0]?.message?.content;
 }
 
-async function callHuggingFace({ systemPrompt, userPrompt, imageBase64, imageMimeType }) {
-  if (!env.ai.huggingface.token) throw new Error('Hugging Face not configured');
-  const model = imageBase64 ? env.ai.huggingface.visionModel : env.ai.huggingface.model;
+// 3. DeepSeek — OpenAI-compatible chat completions, text only.
+async function callDeepSeek({ systemPrompt, userPrompt, imageBase64 }) {
+  if (!env.ai.deepseek.key) throw new Error('DeepSeek not configured');
+  if (imageBase64) throw new Error('DeepSeek does not support vision in this gateway');
+  const res = await withTimeout(
+    fetch('https://api.deepseek.com/chat/completions', {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${env.ai.deepseek.key}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        model: env.ai.deepseek.model,
+        messages: [
+          { role: 'system', content: systemPrompt },
+          { role: 'user', content: userPrompt },
+        ],
+        temperature: 0.2,
+      }),
+    }),
+    TIMEOUT_MS,
+    'DeepSeek'
+  );
+  if (!res.ok) throw new Error(`DeepSeek HTTP ${res.status}: ${await res.text()}`);
+  const data = await res.json();
+  return data.choices?.[0]?.message?.content;
+}
+
+// 4. OpenAI — chat completions, supports vision too (final fallback for images).
+async function callOpenAI({ systemPrompt, userPrompt, imageBase64, imageMimeType }) {
+  if (!env.ai.openai.key) throw new Error('OpenAI not configured');
 
   const userContent = imageBase64
     ? [
@@ -150,14 +145,14 @@ async function callHuggingFace({ systemPrompt, userPrompt, imageBase64, imageMim
     : userPrompt;
 
   const res = await withTimeout(
-    fetch('https://router.huggingface.co/v1/chat/completions', {
+    fetch('https://api.openai.com/v1/chat/completions', {
       method: 'POST',
       headers: {
-        Authorization: `Bearer ${env.ai.huggingface.token}`,
+        Authorization: `Bearer ${env.ai.openai.key}`,
         'Content-Type': 'application/json',
       },
       body: JSON.stringify({
-        model,
+        model: env.ai.openai.model,
         messages: [
           { role: 'system', content: systemPrompt },
           { role: 'user', content: userContent },
@@ -166,18 +161,18 @@ async function callHuggingFace({ systemPrompt, userPrompt, imageBase64, imageMim
       }),
     }),
     TIMEOUT_MS,
-    'HuggingFace'
+    'OpenAI'
   );
-  if (!res.ok) throw new Error(`HuggingFace HTTP ${res.status}: ${await res.text()}`);
+  if (!res.ok) throw new Error(`OpenAI HTTP ${res.status}: ${await res.text()}`);
   const data = await res.json();
   return data.choices?.[0]?.message?.content;
 }
 
 const PROVIDER_CHAIN = [
-  { name: 'openrouter', call: callOpenRouter },
-  { name: 'gemini', call: callGemini },
-  { name: 'groq', call: callGroq },
-  { name: 'huggingface', call: callHuggingFace },
+  { name: 'gemini', call: callGemini, supportsVision: true },
+  { name: 'groq', call: callGroq, supportsVision: false },
+  { name: 'deepseek', call: callDeepSeek, supportsVision: false },
+  { name: 'openai', call: callOpenAI, supportsVision: true },
 ];
 
 /**
@@ -188,9 +183,9 @@ const PROVIDER_CHAIN = [
 async function analyze(input) {
   const errors = [];
   for (const provider of PROVIDER_CHAIN) {
-    // Vision requests skip Groq (see callGroq note above) so we don't burn a
-    // guaranteed-to-fail call before falling through to HuggingFace.
-    if (input.imageBase64 && provider.name === 'groq') continue;
+    // Skip text-only providers for vision requests instead of burning a
+    // guaranteed-to-fail call before falling through to a vision-capable one.
+    if (input.imageBase64 && !provider.supportsVision) continue;
     try {
       const raw = await provider.call(input);
       const json = extractJson(raw);
@@ -201,6 +196,7 @@ async function analyze(input) {
       errors.push(`${provider.name}: ${err.message}`);
     }
   }
+  logger.error(`All AI providers failed: ${errors.join(' | ')}`);
   throw new AppError(
     'सभी AI सेवाएँ अभी उपलब्ध नहीं हैं। कृपया थोड़ी देर बाद पुनः प्रयास करें।',
     503,
